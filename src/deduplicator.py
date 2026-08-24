@@ -19,6 +19,10 @@ class Deduplicator:
         events = self._dedup_by_title(events)
         events = self._dedup_by_company_event(events)
         
+        for e in events:
+            if "urls" not in e:
+                e["urls"] = [e.get("url", "")] if e.get("url") else []
+        
         return events
     
     def _dedup_by_url(self, events: List[Dict]) -> List[Dict]:
@@ -32,13 +36,10 @@ class Deduplicator:
             
             if normalized in seen_urls:
                 existing = seen_urls[normalized]
-                existing["sources"] = existing.get("sources", [existing.get("source", "")])
-                if event.get("source") and event.get("source") not in existing["sources"]:
-                    existing["sources"].append(event["source"])
-                if event.get("raw_score", 0) > existing.get("raw_score", 0):
-                    existing["raw_score"] = event["raw_score"]
+                self._merge_events(existing, event)
             else:
                 event["sources"] = [event.get("source", "")]
+                event["urls"] = [url] if url else []
                 seen_urls[normalized] = event
                 unique.append(event)
         
@@ -62,6 +63,8 @@ class Deduplicator:
                     break
             
             if not is_duplicate:
+                if "urls" not in event:
+                    event["urls"] = [event.get("url", "")] if event.get("url") else []
                 unique.append(event)
         
         return unique
@@ -73,6 +76,8 @@ class Deduplicator:
         for event in events:
             company = event.get("company", "")
             if not company:
+                if "urls" not in event:
+                    event["urls"] = [event.get("url", "")] if event.get("url") else []
                 unique.append(event)
                 continue
             
@@ -88,6 +93,8 @@ class Deduplicator:
                     break
             
             if not is_duplicate:
+                if "urls" not in event:
+                    event["urls"] = [event.get("url", "")] if event.get("url") else []
                 unique.append(event)
         
         return unique
@@ -101,6 +108,14 @@ class Deduplicator:
         if new_source and new_source not in existing["sources"]:
             existing["sources"].append(new_source)
         
+        # 关键修复：合并具体URL
+        if "urls" not in existing:
+            existing["urls"] = [existing.get("url", "")] if existing.get("url") else []
+        
+        new_url = new.get("url", "")
+        if new_url and new_url not in existing["urls"]:
+            existing["urls"].append(new_url)
+        
         if new.get("raw_score", 0) > existing.get("raw_score", 0):
             existing["raw_score"] = new["raw_score"]
         
@@ -113,7 +128,6 @@ class Deduplicator:
             existing["published_at"] = new_pub
     
     def _normalize_url(self, url: str) -> str:
-        """规范化URL"""
         url = url.lower().strip()
         url = re.sub(r'^https?://', '', url)
         url = re.sub(r'^www\.', '', url)
@@ -122,7 +136,6 @@ class Deduplicator:
         return url
     
     def _normalize_title(self, title: str) -> str:
-        """规范化标题用于比较"""
         title = title.lower()
         title = re.sub(r'[^\w\s]', '', title)
         stopwords = {"the", "a", "an", "is", "are", "was", "were", "be", "been",
@@ -141,7 +154,6 @@ class Deduplicator:
         return " ".join(words)
     
     def _extract_event_type(self, title: str) -> str:
-        """提取事件类型"""
         title_lower = title.lower()
         
         if any(w in title_lower for w in ["release", "发布", "launch", "推出", "introduce"]):
