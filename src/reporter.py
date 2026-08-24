@@ -6,16 +6,15 @@ from src.config import CATEGORIES, REPORT_TEMPLATE, SECTION_TEMPLATE, EVENT_TEMP
 
 class Reporter:
     """生成Markdown日报"""
-
+    
     def __init__(self):
         os.makedirs(REPORTS_DIR, exist_ok=True)
-
+    
     def generate(self, events: List[Dict]) -> str:
-        """生成日报"""
         today = datetime.utcnow().strftime("%Y-%m-%d")
         significant = [e for e in events if e.get("total_score", 0) >= 40]
         top_events = significant[:5]
-
+        
         report = REPORT_TEMPLATE.format(
             date=today,
             generated_at=datetime.utcnow().strftime("%Y-%m-%d %H:%M UTC"),
@@ -26,14 +25,14 @@ class Reporter:
             top5=self._gen_top5(significant[:5]),
             trends=self._gen_trends(significant),
         )
-
+        
         filename = f"{today}.md"
         filepath = os.path.join(REPORTS_DIR, filename)
         with open(filepath, "w", encoding="utf-8") as f:
             f.write(report)
-
+        
         return filepath
-
+    
     def _gen_executive_summary(self, events: List[Dict]) -> str:
         if not events:
             return "今日AI行业无重大突破性动态。"
@@ -42,19 +41,28 @@ class Reporter:
             lines.append(f"{i}. **{e.get('title', '')}** ({e.get('importance', '')})")
             lines.append(f"   - {e.get('why_important', '')[:120]}...")
         return "\n".join(lines)
-
+    
     def _gen_sections(self, events: List[Dict]) -> str:
         sections = []
         for cat_key, cat_name in CATEGORIES.items():
             cat_events = [e for e in events if e.get("category") == cat_key]
             if not cat_events:
                 continue
-
+            
             events_md = []
             for e in cat_events[:10]:
-                sources = e.get("sources", [e.get("source", "")])
-                sources_str = "\n".join([f"- {s}" for s in sources if s])
-
+                # 关键修复：显示具体URL
+                urls = e.get("urls", [])
+                if not urls and e.get("url"):
+                    urls = [e.get("url")]
+                
+                sources_str = ""
+                if urls:
+                    sources_str = "\n".join([f"- [{self._extract_domain(u)}]({u})" for u in urls if u])
+                else:
+                    srcs = e.get("sources", [e.get("source", "")])
+                    sources_str = "\n".join([f"- {s}" for s in srcs if s])
+                
                 event_md = EVENT_TEMPLATE.format(
                     importance=e.get("importance", "★★☆☆☆"),
                     title=e.get("title", ""),
@@ -66,15 +74,15 @@ class Reporter:
                     sources=sources_str,
                 )
                 events_md.append(event_md)
-
+            
             section = SECTION_TEMPLATE.format(
                 category_name=cat_name,
                 events="".join(events_md),
             )
             sections.append(section)
-
+        
         return "\n".join(sections)
-
+    
     def _gen_top5(self, events: List[Dict]) -> str:
         if not events:
             return "今日无足够重要事件入选Top 5。"
@@ -84,9 +92,14 @@ class Reporter:
             lines.append(f"**发生了什么**: {e.get('summary', '')[:200]}...")
             lines.append(f"**为什么重要**: {e.get('why_important', '')}")
             lines.append(f"**未来可能**: {self._gen_future(e)}")
+            urls = e.get("urls", [])
+            if not urls and e.get("url"):
+                urls = [e.get("url")]
+            if urls:
+                lines.append(f"**来源**: [{self._extract_domain(urls[0])}]({urls[0]})")
             lines.append("")
         return "\n".join(lines)
-
+    
     def _gen_future(self, event: Dict) -> str:
         cat = event.get("category", "")
         futures = {
@@ -101,11 +114,11 @@ class Reporter:
             "ai_business": "资本向头部集中，并购活动可能增加。",
         }
         return futures.get(cat, "建议持续关注后续产品化和市场反馈。")
-
+    
     def _gen_trends(self, events: List[Dict]) -> str:
         if len(events) < 3:
             return "数据不足，暂无法形成可靠趋势判断。"
-
+        
         cat_counts = {}
         company_counts = {}
         for e in events:
@@ -114,18 +127,23 @@ class Reporter:
             comp = e.get("company", "Unknown")
             if comp:
                 company_counts[comp] = company_counts.get(comp, 0) + 1
-
+        
         lines = ["### 近期信号统计"]
         lines.append(f"- 今日覆盖事件: {len(events)}条")
         lines.append(f"- 最活跃领域: {max(cat_counts, key=cat_counts.get, default='N/A')}")
         if company_counts:
             lines.append(f"- 最活跃公司: {max(company_counts, key=company_counts.get, default='N/A')}")
-
+        
         lines.append("\n### 观察要点")
         lines.append("基于今日数据，建议关注以下方向是否形成持续趋势：")
         lines.append("1. 模型发布密度是否持续走高")
         lines.append("2. Agent产品化是否从Demo走向实用")
         lines.append("3. 开源社区是否出现新的技术范式")
         lines.append("4. 硬件供应链是否有重大变化信号")
-
+        
         return "\n".join(lines)
+    
+    def _extract_domain(self, url: str) -> str:
+        import re
+        match = re.search(r'https?://(?:www\.)?([^/]+)', url)
+        return match.group(1) if match else url[:40]
